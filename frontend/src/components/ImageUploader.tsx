@@ -1,13 +1,19 @@
-import { useState, useRef, type DragEvent, type ChangeEvent } from 'react';
-import { uploadImage } from '../lib/api';
+import { useState, useRef, type DragEvent, type ChangeEvent } from "react";
+import {  uploadImage } from "../lib/api";
 
 interface Props {
   onUploadSuccess: () => void;
 }
 
-type Status = 'idle' | 'uploading' | 'success' | 'error';
+type Status = "idle" | "uploading" | "success" | "error";
 
-const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'];
+const ALLOWED_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "image/svg+xml",
+];
 
 function UploadIcon() {
   return (
@@ -31,19 +37,19 @@ function UploadIcon() {
 export function ImageUploader({ onUploadSuccess }: Props) {
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
-  const [status, setStatus] = useState<Status>('idle');
-  const [message, setMessage] = useState('');
+  const [status, setStatus] = useState<Status>("idle");
+  const [message, setMessage] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleFile = (f: File) => {
     if (!ALLOWED_TYPES.includes(f.type)) {
-      setStatus('error');
+      setStatus("error");
       setMessage(`Tipo no permitido: ${f.type}`);
       return;
     }
     setFile(f);
-    setStatus('idle');
-    setMessage('');
+    setStatus("idle");
+    setMessage("");
   };
 
   const handleDrop = (e: DragEvent<HTMLDivElement>) => {
@@ -60,25 +66,28 @@ export function ImageUploader({ onUploadSuccess }: Props) {
 
   const handleUpload = async () => {
     if (!file) return;
-    setStatus('uploading');
-    setMessage('');
+    setStatus("uploading");
+    setMessage("");
 
     try {
       const result = await uploadImage(file);
 
       if (result.success) {
-        setStatus('success');
-        setMessage('Imagen subida y encolada para procesamiento.');
+        setStatus("success");
+        setMessage("Imagen subida y encolada para procesamiento.");
         setFile(null);
-        if (inputRef.current) inputRef.current.value = '';
+
+
+
+        if (inputRef.current) inputRef.current.value = "";
         onUploadSuccess();
       } else {
-        setStatus('error');
+        setStatus("error");
         setMessage(result.error.message);
       }
     } catch {
-      setStatus('error');
-      setMessage('No se pudo conectar al servidor.');
+      setStatus("error");
+      setMessage("No se pudo conectar al servidor.");
     }
   };
 
@@ -94,14 +103,14 @@ export function ImageUploader({ onUploadSuccess }: Props) {
         onClick={() => inputRef.current?.click()}
         className={`border-2 border-dashed rounded-2xl p-12 text-center cursor-pointer transition-all select-none ${
           dragging
-            ? 'border-violet-400 bg-violet-500/10'
-            : 'border-slate-700 hover:border-slate-500 bg-slate-900/50'
+            ? "border-violet-400 bg-violet-500/10"
+            : "border-slate-700 hover:border-slate-500 bg-slate-900/50"
         }`}
       >
         <input
           ref={inputRef}
           type="file"
-          accept={ALLOWED_TYPES.join(',')}
+          accept={ALLOWED_TYPES.join(",")}
           className="hidden"
           onChange={handleChange}
         />
@@ -120,7 +129,9 @@ export function ImageUploader({ onUploadSuccess }: Props) {
               <p className="font-medium text-slate-300">
                 Arrastra una imagen o haz clic para seleccionar
               </p>
-              <p className="text-sm">JPEG, PNG, GIF, WebP, SVG &middot; m&aacute;x. 10 MB</p>
+              <p className="text-sm">
+                JPEG, PNG, GIF, WebP, SVG &middot; m&aacute;x. 10 MB
+              </p>
             </>
           )}
         </div>
@@ -129,16 +140,16 @@ export function ImageUploader({ onUploadSuccess }: Props) {
       {file && (
         <button
           onClick={handleUpload}
-          disabled={status === 'uploading'}
+          disabled={status === "uploading"}
           className="w-full py-3 rounded-xl bg-violet-600 hover:bg-violet-500 active:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold transition-colors"
         >
-          {status === 'uploading' ? 'Subiendo...' : 'Subir imagen'}
+          {status === "uploading" ? "Subiendo..." : "Subir imagen"}
         </button>
       )}
 
       {message && (
         <p
-          className={`text-sm text-center ${status === 'error' ? 'text-red-400' : 'text-emerald-400'}`}
+          className={`text-sm text-center ${status === "error" ? "text-red-400" : "text-emerald-400"}`}
         >
           {message}
         </p>

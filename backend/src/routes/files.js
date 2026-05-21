@@ -38,12 +38,17 @@ router.post('/upload', async (req, res, next) => {
       throw new AppError('Error al subir la imagen al bucket S3.', 502, 'S3_UPLOAD_FAILED');
     }
 
+    const cfUrl = `${CLOUDFRONT_DOMAIN}/${INPUT_FOLDER}${filename}`;
+
+    const signedUrl = await firmarUrl(cfUrl);
+
     return res.status(201).json({
       success: true,
       message: 'Imagen subida y encolada para procesamiento.',
       data: {
         key: `${INPUT_FOLDER}${filename}`,
-        filename,
+        filename: filename,
+        url: signedUrl,
         size: file.size,
         mimeType: file.mimetype,
       },
