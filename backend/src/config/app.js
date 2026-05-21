@@ -17,7 +17,7 @@ const config = {
   isProd: env === 'production',
 
   cors: {
-    origin: process.env.CORS_ORIGIN || 'http://localhost:4322',
+    origin: process.env.CORS_ORIGIN,
   },
 
   rateLimit: {

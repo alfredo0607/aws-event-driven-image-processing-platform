@@ -7,6 +7,7 @@ import rateLimit from 'express-rate-limit';
 
 import cfg from './config/app.js';
 import indexRouter from './routes/index.js';
+import filesRouter from './routes/files.js';
 
 import { errorHandler, notFoundHandler } from './middlewares/errorHandler.js';
 
@@ -64,7 +65,7 @@ app.use(cfg.prefix, limiter);
 // ─── Routes ───────────────────────────────────────────────────────────────
 app.use('/', indexRouter);
 app.use(cfg.prefix, indexRouter);
-// app.use(`${cfg.prefix}/files`, filesRouter);
+app.use(`${cfg.prefix}/files`, filesRouter);
 
 // ─── 404 & error handlers (must be LAST) ─────────────────────────────────
 app.use(notFoundHandler);

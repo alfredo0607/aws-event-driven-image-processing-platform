@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find \"c:/Users/alfre/proyect-bartik\" -name \"pnpm-workspace.yaml\" 2>/dev/null | head -10)",
+      "Read(//c/Users/alfre/proyect-bartik/**)",
+      "Bash(pnpm astro *)"
+    ]
+  }
+}

@@ -1,0 +1,162 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { ImageProcessor } from '../components/ImageProcessor';
+---
+
+<Layout title="AWS Image Processing Platform">
+  <div class="max-w-5xl mx-auto px-4 py-10 space-y-12">
+
+    <!-- ── Header ─────────────────────────────────────────────────── -->
+    <header class="space-y-3">
+      <p class="text-xs font-mono text-violet-400 tracking-widest uppercase">Arquitectura 03</p>
+      <h1 class="text-3xl font-bold tracking-tight text-slate-100">
+        Event-Driven Serverless<br />Image Processing
+      </h1>
+      <p class="text-slate-400 max-w-2xl">
+        Demo de una arquitectura orientada a eventos en AWS donde el procesamiento de im&aacute;genes
+        ocurre de forma as&iacute;ncrona, desacoplada y sin gestionar servidores.
+      </p>
+    </header>
+
+    <!-- ── Qué es y qué se busca demostrar ───────────────────────── -->
+    <section class="grid md:grid-cols-2 gap-6">
+
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-3">
+        <h2 class="text-sm font-semibold text-slate-200 uppercase tracking-wide">
+          Qu&eacute; es esta demo
+        </h2>
+        <p class="text-slate-400 text-sm leading-relaxed">
+          Una plataforma que recibe im&aacute;genes a trav&eacute;s de una API REST, las almacena en
+          <strong class="text-slate-300">Amazon S3</strong> y desencadena autom&aacute;ticamente un
+          pipeline serverless que genera tres versiones redimensionadas:
+          <span class="text-slate-300">800&times;600</span>,
+          <span class="text-slate-300">400&times;300</span> y
+          <span class="text-slate-300">150&times;150</span>.
+          Los metadatos del procesamiento se persisten en
+          <strong class="text-slate-300">DynamoDB</strong> y se env&iacute;a una notificaci&oacute;n
+          v&iacute;a <strong class="text-slate-300">SNS</strong>.
+        </p>
+      </div>
+
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-3">
+        <h2 class="text-sm font-semibold text-slate-200 uppercase tracking-wide">
+          Qu&eacute; se busca demostrar
+        </h2>
+        <ul class="text-slate-400 text-sm leading-relaxed space-y-2">
+          <li class="flex gap-2">
+            <span class="text-violet-400 mt-0.5">&#x25B6;</span>
+            <span>
+              <strong class="text-slate-300">Desacoplamiento</strong> mediante SQS como buffer entre el
+              evento de S3 y la ejecuci&oacute;n de Lambda.
+            </span>
+          </li>
+          <li class="flex gap-2">
+            <span class="text-violet-400 mt-0.5">&#x25B6;</span>
+            <span>
+              <strong class="text-slate-300">Resiliencia</strong> con reintentos autom&aacute;ticos
+              (hasta 3) y Dead-Letter Queue para mensajes fallidos.
+            </span>
+          </li>
+          <li class="flex gap-2">
+            <span class="text-violet-400 mt-0.5">&#x25B6;</span>
+            <span>
+              <strong class="text-slate-300">Escalabilidad</strong> sin provisionamiento: Lambda escala
+              autom&aacute;ticamente seg&uacute;n la carga de uploads.
+            </span>
+          </li>
+          <li class="flex gap-2">
+            <span class="text-violet-400 mt-0.5">&#x25B6;</span>
+            <span>
+              <strong class="text-slate-300">Contenido privado</strong> servido de forma segura mediante
+              URLs firmadas de CloudFront.
+            </span>
+          </li>
+        </ul>
+      </div>
+
+    </section>
+
+    <!-- ── Pipeline paso a paso ──────────────────────────────────── -->
+    <section class="space-y-4">
+      <h2 class="text-sm font-semibold text-slate-200 uppercase tracking-wide">
+        C&oacute;mo funciona el pipeline
+      </h2>
+      <ol class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        {[
+          {
+            n: '01',
+            service: 'API + S3',
+            title: 'Upload',
+            desc: 'El usuario sube la imagen vía API REST. El backend la deposita en el bucket S3 de input bajo el prefijo image-resize/input/.',
+          },
+          {
+            n: '02',
+            service: 'S3 Event Notification',
+            title: 'Evento disparado',
+            desc: 'S3 emite un evento s3:ObjectCreated:* con entrega at-least-once hacia SQS en cuanto el objeto está disponible.',
+          },
+          {
+            n: '03',
+            service: 'SQS',
+            title: 'Buffer y retry',
+            desc: 'SQS actúa como buffer. VisibilityTimeout = 6× el timeout de Lambda. Tras 3 fallos el mensaje pasa a la DLQ.',
+          },
+          {
+            n: '04',
+            service: 'Lambda (Python + Pillow)',
+            title: 'Procesamiento',
+            desc: 'Lambda descarga la imagen en memoria, genera 3 versiones con Pillow y las sube a S3 output bajo resized/.',
+          },
+          {
+            n: '05',
+            service: 'DynamoDB',
+            title: 'Persistencia',
+            desc: 'Lambda registra el resultado en DynamoDB: status, rutas S3 de las versiones, dimensiones originales y timestamp.',
+          },
+          {
+            n: '06',
+            service: 'SNS + CloudFront',
+            title: 'Notificación y acceso',
+            desc: 'SNS notifica el resultado (email/webhook). Las imágenes se sirven vía CloudFront con URLs firmadas (expiran en 24 h).',
+          },
+        ].map((step) => (
+          <li class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-mono text-violet-400">{step.n}</span>
+              <span class="text-xs text-slate-600 font-medium">{step.service}</span>
+            </div>
+            <p class="text-sm font-semibold text-slate-200">{step.title}</p>
+            <p class="text-xs text-slate-500 leading-relaxed">{step.desc}</p>
+          </li>
+        ))}
+      </ol>
+    </section>
+
+    <!-- ── Stack de servicios ─────────────────────────────────────── -->
+    <section class="space-y-4">
+      <h2 class="text-sm font-semibold text-slate-200 uppercase tracking-wide">
+        Servicios AWS involucrados
+      </h2>
+      <div class="flex flex-wrap gap-2">
+        {['S3', 'SQS', 'Lambda', 'DynamoDB', 'SNS', 'CloudFront', 'IAM', 'CloudWatch'].map((s) => (
+          <span class="px-3 py-1 rounded-full bg-slate-800 border border-slate-700 text-slate-300 text-xs font-medium">
+            {s}
+          </span>
+        ))}
+      </div>
+    </section>
+
+    <!-- ── Demo interactiva ───────────────────────────────────────── -->
+    <section class="space-y-4">
+      <div class="border-t border-slate-800 pt-8 space-y-1">
+        <h2 class="text-lg font-semibold text-slate-100">Demo interactiva</h2>
+        <p class="text-slate-500 text-sm">
+          Sube una imagen y observa c&oacute;mo aparece procesada en la galería tras unos segundos.
+          Usa el bot&oacute;n <strong class="text-slate-400">Actualizar</strong> para refrescar la galería.
+        </p>
+      </div>
+      <ImageProcessor client:load />
+    </section>
+
+  </div>
+</Layout>
