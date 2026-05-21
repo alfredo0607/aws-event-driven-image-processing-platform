@@ -46,7 +46,7 @@ def build() -> None:
     print(f"[build] Copiando {HANDLER_SRC.name} ...")
     shutil.copy(HANDLER_SRC, PACKAGE_DIR / HANDLER_SRC.name)
 
-    print(f"[build] Listo → {PACKAGE_DIR}")
+    print(f"[build] Listo -> {PACKAGE_DIR}")
     print("[build] Ahora ejecuta: terraform apply")
 
 

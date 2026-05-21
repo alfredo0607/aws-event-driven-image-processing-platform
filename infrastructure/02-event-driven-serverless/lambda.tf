@@ -1,13 +1,33 @@
 #################################################
+# BUILD AUTOMÁTICO DEL PAQUETE LAMBDA
+# Se ejecuta en `terraform apply` cuando handler.py o
+# requirements.txt cambian. Instala Pillow compilado para
+# Linux x86_64 (manylinux) dentro de lambda/package/.
+#################################################
+
+resource "null_resource" "lambda_build" {
+  triggers = {
+    handler_md5      = filemd5("${path.module}/lambda/handler.py")
+    requirements_md5 = filemd5("${path.module}/lambda/requirements.txt")
+  }
+
+  provisioner "local-exec" {
+    command     = "python build.py"
+    working_dir = path.module
+  }
+}
+
+#################################################
 # LAMBDA DEPLOYMENT PACKAGE
-# Empaqueta lambda/handler.py.
-# Ejecutar `python build.py` antes de `terraform apply`
-# para incluir Pillow en lambda/package/.
+# archive_file depende de null_resource para asegurar que
+# lambda/package/ ya existe antes de ser empaquetado.
 #################################################
 
 data "archive_file" "lambda" {
+  depends_on = [null_resource.lambda_build]
+
   type        = "zip"
-  source_file = "${path.module}/lambda/handler.py"
+  source_dir  = "${path.module}/lambda/package"
   output_path = "${path.module}/.build/handler.zip"
 }
 
@@ -16,20 +36,20 @@ data "archive_file" "lambda" {
 # Runtime: Python 3.12
 # Timeout: var.lambda_timeout (default 60 s)
 # Memory: var.lambda_memory_mb (default 512 MB)
-# ReservedConcurrency: var.lambda_reserved_concurrency (default 50)
-#   → previene que un pico de uploads consuma todo el límite regional (1000)
+# reserved_concurrent_executions: -1 = sin reserva,
+#   usa el pool general de la cuenta (correcto para dev).
+#   En producción cambiar a 50+ en terraform.tfvars.
 #################################################
 
 resource "aws_lambda_function" "image_processor" {
   function_name = "${local.prefix}-processor"
   role          = aws_iam_role.lambda.arn
 
-  handler  = "handler.lambda_handler"
-  runtime  = "python3.12"
-  timeout  = var.lambda_timeout
+  handler     = "handler.lambda_handler"
+  runtime     = "python3.12"
+  timeout     = var.lambda_timeout
   memory_size = var.lambda_memory_mb
 
-  # Limite de concurrencia: 50 invocaciones simultáneas
   reserved_concurrent_executions = var.lambda_reserved_concurrency
 
   filename         = data.archive_file.lambda.output_path
@@ -54,8 +74,8 @@ resource "aws_lambda_function" "image_processor" {
 #################################################
 # EVENT SOURCE MAPPING — SQS → Lambda
 # batch_size: hasta 10 mensajes por invocación
-# ReportBatchItemFailures: respuesta parcial de fallos,
-#   evita reintentar mensajes exitosos del mismo batch
+# ReportBatchItemFailures: solo reintenta mensajes
+#   fallidos del batch, no el batch completo
 #################################################
 
 resource "aws_lambda_event_source_mapping" "sqs_trigger" {

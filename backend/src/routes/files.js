@@ -72,8 +72,8 @@ router.get('/', async (req, res, next) => {
         let signedUrl = null;
 
         if (CLOUDFRONT_DOMAIN) {
-          const cfUrl = `https://${CLOUDFRONT_DOMAIN}/${item.Key}`;
-          signedUrl = await firmarUrl(cfUrl).catch(() => null);
+          const cfUrl = `${CLOUDFRONT_DOMAIN}/${item.Key}`;
+          signedUrl = await firmarUrl(cfUrl);
         }
 
         return {
@@ -90,6 +90,7 @@ router.get('/', async (req, res, next) => {
       data: { count: files.length, files },
     });
   } catch (err) {
+    console.error('Error en GET /files:', err);
     next(err);
   }
 });
@@ -108,7 +109,10 @@ router.get('/signed-url', async (req, res, next) => {
       throw new AppError('CLOUDFRONT_DOMAIN no está configurado.', 500, 'CF_NOT_CONFIGURED');
     }
 
-    const cfUrl = `https://${CLOUDFRONT_DOMAIN}/${key}`;
+    const cfUrl = `${CLOUDFRONT_DOMAIN}/${key}`;
+
+    console.info(`Generando URL firmada para: ${cfUrl}`);
+
     const signedUrl = await firmarUrl(cfUrl);
 
     return res.status(200).json({

@@ -40,8 +40,8 @@ variable "lambda_memory_mb" {
 
 variable "lambda_reserved_concurrency" {
   type        = number
-  description = "Concurrencia reservada para Lambda. Previene que un pico consuma todo el límite regional."
-  default     = 50
+  description = "Concurrencia reservada para Lambda. -1 = sin límite (usa el pool general de la cuenta). En producción usar 50 o más para prevenir throttling de otros servicios."
+  default     = -1
 }
 
 variable "sqs_batch_size" {
