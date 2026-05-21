@@ -1,0 +1,10 @@
+node_modules/
+.env
+.env.*
+src/AWS/cloudfront/key/
+*.pem
+.git/
+.gitignore
+readme.md
+eslint.config.js
+.prettierrc

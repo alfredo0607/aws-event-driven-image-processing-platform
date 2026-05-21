@@ -1,0 +1,60 @@
+{
+  "name": "aws-event-driven-image-processing-platform-backend",
+  "version": "1.0.0",
+  "description": "About Event-driven serverless image processing platform built with AWS Lambda, S3, SQS, SNS, DynamoDB, Python and Terraform..",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "prod": "cross-env NODE_ENV=production node src/server.js",
+    "db:test": "node src/config/db.test.js",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "node --test",
+    "clean": "rimraf node_modules",
+    "restart": "npm run clean && npm install"
+  },
+  "keywords": [
+    "aws",
+    "cloudfront",
+    "s3",
+    "signed-urls",
+    "oac",
+    "sigv4",
+    "backend"
+  ],
+  "author": "Alfredo Jose Dominguez Hernandez",
+  "license": "ISC",
+  "packageManager": "pnpm@11.1.2",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1048.0",
+    "@aws-sdk/cloudfront-signer": "^3.1048.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "express-fileupload": "^1.5.2",
+    "express-rate-limit": "^8.5.2",
+    "helmet": "^8.1.0",
+    "morgan": "^1.10.1",
+    "nanoid": "^5.1.11",
+    "sharp": "^0.34.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "cross-env": "^10.1.0",
+    "eslint": "^10.3.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-node": "^11.1.0",
+    "eslint-plugin-prettier": "^5.5.5",
+    "globals": "^17.6.0",
+    "nodemon": "^3.1.14",
+    "prettier": "^3.8.3",
+    "rimraf": "^6.1.3"
+  }
+}

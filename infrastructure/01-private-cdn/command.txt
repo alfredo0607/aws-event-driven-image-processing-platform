@@ -1,0 +1,8 @@
+
+terraform init: Inicializar 
+
+terraform validate: Validar sintaxis 
+
+terraform plan: Ver plan
+
+terraform apply: Aplicar
