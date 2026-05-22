@@ -80,33 +80,38 @@ dnf install -y python3-certbot-nginx
 # ── Script de deploy (reutilizado por el pipeline CI/CD) ─────────────────────
 cat > /home/ec2-user/deploy.sh << 'DEPLOY_SCRIPT'
 #!/bin/bash
-# Uso: ./deploy.sh <imagen>
-# Ejemplo: ./deploy.sh ghcr.io/owner/repo/backend:sha-abc123
+# Uso: ./deploy.sh <imagen> <contenedor> [puerto-host] [env-file]
+# Ejemplos:
+#   ./deploy.sh ghcr.io/owner/repo/backend:sha-abc123 mi-api
+#   ./deploy.sh ghcr.io/owner/repo/backend:sha-abc123 mi-api 3001 /home/ec2-user/.env.image-api
 set -euo pipefail
 
-IMAGE="$${1:?Error: indica la imagen. Uso: ./deploy.sh <imagen>}"
+IMAGE="${1:?Error: indica la imagen. Uso: ./deploy.sh <imagen> <contenedor>}"
 CONTAINER="${2:?Error: indica el nombre del contenedor}"
-ENV_FILE="/home/ec2-user/.env"
+HOST_PORT="${3:-3000}"
+ENV_FILE="${4:-/home/ec2-user/.env}"
 
-echo "[deploy] Deteniendo contenedor anterior..."
+echo "[deploy] Deteniendo contenedor anterior: $CONTAINER ..."
 docker stop "$CONTAINER" 2>/dev/null || true
 docker rm   "$CONTAINER" 2>/dev/null || true
 
-echo "[deploy] Iniciando: $IMAGE"
+echo "[deploy] Iniciando: $IMAGE en puerto $HOST_PORT"
 if [ -f "$ENV_FILE" ]; then
   docker run -d \
     --name            "$CONTAINER" \
     --restart         unless-stopped \
-    -p                3000:3000 \
+    -p                "${HOST_PORT}:3000" \
     --env-file        "$ENV_FILE" \
     -v /home/ec2-user/key:/home/ec2-user/key:ro \
+    --log-opt         max-size=50m \
+    --log-opt         max-file=3 \
     "$IMAGE"
 else
   echo "[deploy] ADVERTENCIA: $ENV_FILE no existe; el contenedor arranca sin vars de entorno."
   docker run -d \
     --name            "$CONTAINER" \
     --restart         unless-stopped \
-    -p                3000:3000 \
+    -p                "${HOST_PORT}:3000" \
     -v /home/ec2-user/key:/home/ec2-user/key:ro \
     "$IMAGE"
 fi
@@ -115,6 +120,7 @@ echo "[deploy] Limpiando imágenes antiguas..."
 docker image prune -f
 
 echo "[deploy] Listo."
+docker ps --filter "name=$CONTAINER" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 DEPLOY_SCRIPT
 
 chmod +x /home/ec2-user/deploy.sh
