@@ -14,7 +14,7 @@ const router = Router();
 router.get('/health', (_req, res) => {
   try {
     return res.status(200).json({
-      message: 'All systems operational, Health check passed.',
+      message: 'All systems operational, Health check passed',
       data: {
         status: 'ok',
         env,

@@ -15,7 +15,7 @@ jobs:
     with:
       container_name: services-resize-image-api # único por API
       host_port: 3001 # único por API
-      build_context: .
+      build_context: backend
     secrets:
       EC2_HOST: ${{ secrets.EC2_HOST }}
       EC2_USER: ${{ secrets.EC2_USER }}
