@@ -94,7 +94,7 @@ resource "aws_internet_gateway" "igw" {
 resource "aws_subnet" "public" {
   vpc_id                  = aws_vpc.main.id
   cidr_block              = "10.0.1.0/24"
-  availability_zone       = "us-east-1a" # t4g.micro no está disponible en us-east-1e
+  availability_zone       = "us-east-1a"  # t4g.micro no está disponible en us-east-1e
   map_public_ip_on_launch = true
 
   tags = { Name = "subnet-public-backend-${var.env}", Env = var.env }
@@ -194,23 +194,20 @@ resource "local_file" "private_key_pem" {
 
 resource "aws_instance" "backend" {
   ami                    = data.aws_ami.al2023.id
-  instance_type          = "t4g.micro" # Free Tier actual (cuentas 2024+): Graviton2 ARM64
+  instance_type          = "t4g.micro"  # Free Tier actual (cuentas 2024+): Graviton2 ARM64
   key_name               = aws_key_pair.deployer.key_name
   vpc_security_group_ids = [aws_security_group.ec2_sg.id]
   subnet_id              = aws_subnet.public.id
 
   # templatefile sustituye ${app_port}; las variables $nginx_var pasan sin cambios
-  user_data = templatefile("${path.module}/user_data.sh", {
-    app_port = var.app_port
-    domain   = var.domain
-  })
+  user_data = templatefile("${path.module}/user_data.sh", {})
 
   # Recrear instancia si cambia el script de arranque
   user_data_replace_on_change = true
 
   root_block_device {
     volume_type = "gp3"
-    volume_size = 30 # mínimo requerido por la AMI de Amazon Linux 2023
+    volume_size = 30  # mínimo requerido por la AMI de Amazon Linux 2023
     encrypted   = true
   }
 

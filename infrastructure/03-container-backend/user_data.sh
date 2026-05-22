@@ -1,21 +1,19 @@
 #!/bin/bash
-# Terraform reemplaza ${app_port} antes de enviar este script a EC2.
-# Las variables de Nginx ($host, $remote_addr, etc.) son bare-dollar y pasan intactas.
+# templatefile({}) procesa $${...} → ${...} para bash; bare $VAR pasa sin cambios.
 set -euo pipefail
 
-# ── Sistema ──────────────────────────────────────────────────────────────────
+# ── Sistema ───────────────────────────────────────────────────────────────────
 dnf update -y
 
-# ── Docker ───────────────────────────────────────────────────────────────────
+# ── Docker ────────────────────────────────────────────────────────────────────
 dnf install -y docker
 systemctl start docker
 systemctl enable docker
 usermod -aG docker ec2-user
 
-# ── Nginx ────────────────────────────────────────────────────────────────────
+# ── Nginx (config base sin virtual hosts — se añaden con add-api.sh) ─────────
 dnf install -y nginx
 
-# Config mínima de nginx sin bloques de servidor por defecto
 cat > /etc/nginx/nginx.conf << 'NGINX_MAIN'
 user nginx;
 worker_processes auto;
@@ -47,81 +45,105 @@ http {
 }
 NGINX_MAIN
 
-# Terraform reemplaza ${domain} y ${app_port} antes de que bash ejecute este script.
-# El heredoc con comillas simples evita que bash expanda $http_upgrade, $host, etc.
-cat > /etc/nginx/conf.d/backend.conf << 'NGINX_VHOST'
+systemctl start nginx
+systemctl enable nginx
+
+# ── Certbot ───────────────────────────────────────────────────────────────────
+dnf install -y python3-certbot-nginx
+
+# ── deploy.sh ─────────────────────────────────────────────────────────────────
+# Uso: ./deploy.sh <imagen> <nombre_contenedor> <puerto_host>
+# El contenedor siempre expone el puerto 3000 internamente.
+# Busca /home/ec2-user/.env.<nombre_contenedor> y si no existe usa .env
+cat > /home/ec2-user/deploy.sh << 'DEPLOY_SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+IMAGE="$${1:?Uso: ./deploy.sh <imagen> <contenedor> <puerto_host>}"
+CONTAINER="$${2:?Uso: ./deploy.sh <imagen> <contenedor> <puerto_host>}"
+HOST_PORT="$${3:?Uso: ./deploy.sh <imagen> <contenedor> <puerto_host>}"
+
+ENV_FILE="/home/ec2-user/.env.$CONTAINER"
+if [ ! -f "$ENV_FILE" ]; then
+  ENV_FILE="/home/ec2-user/.env"
+fi
+
+echo "[deploy] Deteniendo contenedor anterior: $CONTAINER"
+docker stop "$CONTAINER" 2>/dev/null || true
+docker rm   "$CONTAINER" 2>/dev/null || true
+
+echo "[deploy] Iniciando $CONTAINER en puerto $HOST_PORT → imagen $IMAGE"
+if [ -f "$ENV_FILE" ]; then
+  docker run -d \
+    --name    "$CONTAINER" \
+    --restart unless-stopped \
+    -p        "$HOST_PORT:3000" \
+    --env-file "$ENV_FILE" \
+    -v /home/ec2-user/key:/home/ec2-user/key:ro \
+    "$IMAGE"
+else
+  echo "[deploy] ADVERTENCIA: no se encontró $ENV_FILE"
+  docker run -d \
+    --name    "$CONTAINER" \
+    --restart unless-stopped \
+    -p        "$HOST_PORT:3000" \
+    -v /home/ec2-user/key:/home/ec2-user/key:ro \
+    "$IMAGE"
+fi
+
+docker image prune -f
+echo "[deploy] Listo."
+DEPLOY_SCRIPT
+
+# ── add-api.sh ────────────────────────────────────────────────────────────────
+# Registra un nuevo subdominio en Nginx y obtiene el certificado SSL.
+# Uso: ./add-api.sh <subdominio_completo> <puerto_host> [email]
+# Ejemplo: ./add-api.sh api2.alfredo-dominguez.dev 3001
+cat > /home/ec2-user/add-api.sh << 'ADD_API_SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+SUBDOMAIN="$${1:?Uso: ./add-api.sh <subdominio> <puerto> [email]}"
+PORT="$${2:?Uso: ./add-api.sh <subdominio> <puerto> [email]}"
+EMAIL="${3:-desarrollo@bartik-ing.com}"
+CONF="/etc/nginx/conf.d/$SUBDOMAIN.conf"
+
+if [ -f "$CONF" ]; then
+  echo "[add-api] $CONF ya existe — solo renovando certificado."
+else
+  sudo tee "$CONF" > /dev/null << NGINX_VHOST
 server {
     listen 80;
-    server_name ${domain};
+    server_name $SUBDOMAIN;
 
     location / {
-        proxy_pass          http://localhost:${app_port};
+        proxy_pass          http://localhost:$PORT;
         proxy_http_version  1.1;
-        proxy_set_header    Upgrade            $http_upgrade;
+        proxy_set_header    Upgrade            \$http_upgrade;
         proxy_set_header    Connection         'upgrade';
-        proxy_set_header    Host               $host;
-        proxy_set_header    X-Real-IP          $remote_addr;
-        proxy_set_header    X-Forwarded-For    $proxy_add_x_forwarded_for;
-        proxy_set_header    X-Forwarded-Proto  $scheme;
-        proxy_cache_bypass  $http_upgrade;
+        proxy_set_header    Host               \$host;
+        proxy_set_header    X-Real-IP          \$remote_addr;
+        proxy_set_header    X-Forwarded-For    \$proxy_add_x_forwarded_for;
+        proxy_set_header    X-Forwarded-Proto  \$scheme;
+        proxy_cache_bypass  \$http_upgrade;
         proxy_read_timeout  90;
     }
 }
 NGINX_VHOST
 
-systemctl start nginx
-systemctl enable nginx
-
-# ── Certbot (Let's Encrypt) ───────────────────────────────────────────────────
-# Instala certbot. El certificado se solicita manualmente después de
-# apuntar el DNS: sudo certbot --nginx -d ${domain}
-dnf install -y python3-certbot-nginx
-
-# ── Script de deploy (reutilizado por el pipeline CI/CD) ─────────────────────
-cat > /home/ec2-user/deploy.sh << 'DEPLOY_SCRIPT'
-#!/bin/bash
-# Uso: ./deploy.sh <imagen> <contenedor> [puerto-host] [env-file]
-# Ejemplos:
-#   ./deploy.sh ghcr.io/owner/repo/backend:sha-abc123 mi-api
-#   ./deploy.sh ghcr.io/owner/repo/backend:sha-abc123 mi-api 3001 /home/ec2-user/.env.image-api
-set -euo pipefail
-
-IMAGE="${1:?Error: indica la imagen. Uso: ./deploy.sh <imagen> <contenedor>}"
-CONTAINER="${2:?Error: indica el nombre del contenedor}"
-HOST_PORT="${3:-3000}"
-ENV_FILE="${4:-/home/ec2-user/.env}"
-
-echo "[deploy] Deteniendo contenedor anterior: $CONTAINER ..."
-docker stop "$CONTAINER" 2>/dev/null || true
-docker rm   "$CONTAINER" 2>/dev/null || true
-
-echo "[deploy] Iniciando: $IMAGE en puerto $HOST_PORT"
-if [ -f "$ENV_FILE" ]; then
-  docker run -d \
-    --name            "$CONTAINER" \
-    --restart         unless-stopped \
-    -p                "${HOST_PORT}:3000" \
-    --env-file        "$ENV_FILE" \
-    -v /home/ec2-user/key:/home/ec2-user/key:ro \
-    --log-opt         max-size=50m \
-    --log-opt         max-file=3 \
-    "$IMAGE"
-else
-  echo "[deploy] ADVERTENCIA: $ENV_FILE no existe; el contenedor arranca sin vars de entorno."
-  docker run -d \
-    --name            "$CONTAINER" \
-    --restart         unless-stopped \
-    -p                "${HOST_PORT}:3000" \
-    -v /home/ec2-user/key:/home/ec2-user/key:ro \
-    "$IMAGE"
+  sudo nginx -t && sudo systemctl reload nginx
+  echo "[add-api] Nginx configurado: $SUBDOMAIN → localhost:$PORT"
 fi
 
-echo "[deploy] Limpiando imágenes antiguas..."
-docker image prune -f
+sudo certbot --nginx \
+  -d "$SUBDOMAIN" \
+  --non-interactive \
+  --agree-tos \
+  -m "$EMAIL" \
+  --redirect
 
-echo "[deploy] Listo."
-docker ps --filter "name=$CONTAINER" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-DEPLOY_SCRIPT
+echo "[add-api] HTTPS activo en https://$SUBDOMAIN"
+ADD_API_SCRIPT
 
-chmod +x /home/ec2-user/deploy.sh
-chown ec2-user:ec2-user /home/ec2-user/deploy.sh
+chmod +x /home/ec2-user/deploy.sh /home/ec2-user/add-api.sh
+chown ec2-user:ec2-user /home/ec2-user/deploy.sh /home/ec2-user/add-api.sh
