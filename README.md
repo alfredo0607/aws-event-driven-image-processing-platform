@@ -44,86 +44,41 @@ Esta plataforma demuestra cómo implementar un pipeline de procesamiento de imá
 
 ---
 
-## Arquitectura
+## Arquitectura Private CDN
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          Usuario / Navegador                                 │
-└──────────────────────────────────┬──────────────────────────────────────────┘
-                                   │ HTTP POST /api/v1/files/upload
-                                   ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                     Backend (Express.js + Node.js)                           │
-│   • Valida MIME type       • Genera nombre único (nanoid)                    │
-│   • Sube a S3 input        • Retorna URL firmada de CloudFront               │
-└──────────────────────────────────┬──────────────────────────────────────────┘
-                                   │ PutObject
-                                   ▼
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                S3 Bucket  ─  image-resize/input/{uuid}.{ext}                 │
-│                        (S3 Event Notification: ObjectCreated)                │
-└──────────────────────────────────┬──────────────────────────────────────────┘
-                                   │ Mensaje JSON con metadatos del objeto
-                                   ▼
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                  SQS Queue  (buffer + retry + DLQ)                           │
-│   • VisibilityTimeout = 360 s  (6 × Lambda timeout)                         │
-│   • MaxReceiveCount = 3  → tras 3 fallos, mensaje va a DLQ                  │
-└──────────────────────────────────┬──────────────────────────────────────────┘
-                                   │ Event Source Mapping (batch ≤ 10)
-                                   ▼
-┌──────────────────────────────────────────────────────────────────────────────┐
-│              Lambda Function  (Python 3.12 + Pillow)                         │
-│   • Verifica idempotencia en DynamoDB                                        │
-│   • Descarga imagen original de S3                                           │
-│   • Genera 3 variantes con Pillow (LANCZOS)                                  │
-│   • Sube variantes a S3 output  resized/{size}/{uuid}.{ext}                  │
-│   • Registra metadata en DynamoDB (TTL 90 días)                              │
-│   • Publica resultado en SNS                                                 │
-│   • Retorna batchItemFailures para partial retry                             │
-└──────────┬──────────────────────────────────────┬───────────────────────────┘
-           │                                       │
-           ▼                                       ▼
-┌──────────────────────┐             ┌─────────────────────────────────────────┐
-│  S3 Bucket (output)  │             │            DynamoDB Table                │
-│  resized/800x600/    │             │  PK: imageId (S3 key)                    │
-│  resized/400x300/    │             │  status | sizes | processedAt | TTL      │
-│  resized/150x150/    │             └─────────────────────────────────────────┘
-│  (servido por        │
-│   CloudFront +       │
-│   URLs firmadas)     │             ┌─────────────────────────────────────────┐
-└──────────────────────┘             │               SNS Topic                  │
-                                     │  → Email / Webhook / Lambda              │
-                                     └─────────────────────────────────────────┘
-```
+![Diagrama de arquitectura AWS](/infrastructure//01-private-cdn//infrastructure-private-cdn.png)
+
+## Arquitectura Container backend
+
+![Diagrama de arquitectura AWS](/infrastructure//03-container-backend/infrastructure-container-backend.png)
 
 ---
 
 ## Pipeline de Procesamiento
 
-| # | Servicio | Acción |
-|---|----------|--------|
-| 1 | **API + S3** | El usuario sube la imagen vía API REST. El backend la deposita en S3 bajo el prefijo `image-resize/input/`. |
-| 2 | **S3 Event Notification** | S3 emite un evento `s3:ObjectCreated:*` con entrega *at-least-once* hacia SQS en cuanto el objeto está disponible. |
-| 3 | **SQS** | Actúa como buffer y garantía de entrega. `VisibilityTimeout = 6× timeout de Lambda`. Tras 3 fallos el mensaje pasa a la DLQ. |
-| 4 | **Lambda (Python + Pillow)** | Descarga la imagen en memoria, genera 3 variantes con Pillow (LANCZOS) y las sube a S3 output bajo `resized/`. |
-| 5 | **DynamoDB** | Registra el resultado: `imageId`, `status`, rutas S3 de las variantes, dimensiones originales, `processedAt` y TTL. |
-| 6 | **SNS + CloudFront** | SNS notifica el resultado. Las imágenes se sirven vía CloudFront con URLs firmadas (expiran en 1 hora). |
+| #   | Servicio                     | Acción                                                                                                                       |
+| --- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **API + S3**                 | El usuario sube la imagen vía API REST. El backend la deposita en S3 bajo el prefijo `image-resize/input/`.                  |
+| 2   | **S3 Event Notification**    | S3 emite un evento `s3:ObjectCreated:*` con entrega _at-least-once_ hacia SQS en cuanto el objeto está disponible.           |
+| 3   | **SQS**                      | Actúa como buffer y garantía de entrega. `VisibilityTimeout = 6× timeout de Lambda`. Tras 3 fallos el mensaje pasa a la DLQ. |
+| 4   | **Lambda (Python + Pillow)** | Descarga la imagen en memoria, genera 3 variantes con Pillow (LANCZOS) y las sube a S3 output bajo `resized/`.               |
+| 5   | **DynamoDB**                 | Registra el resultado: `imageId`, `status`, rutas S3 de las variantes, dimensiones originales, `processedAt` y TTL.          |
+| 6   | **SNS + CloudFront**         | SNS notifica el resultado. Las imágenes se sirven vía CloudFront con URLs firmadas (expiran en 1 hora).                      |
 
 ---
 
 ## Servicios AWS
 
-| Servicio | Rol |
-|----------|-----|
-| **S3** | Almacenamiento de imágenes input (`image-resize/input/`) y output (`image-resize/resized/`) |
-| **SQS** | Cola de mensajes con reintentos automáticos y DLQ para mensajes fallidos |
-| **Lambda** | Procesamiento serverless por evento — Python 3.12 + Pillow |
-| **DynamoDB** | Persistencia de metadata con TTL automático de 90 días |
-| **SNS** | Notificaciones fanout (email, webhook, otro Lambda) |
-| **CloudFront** | CDN con URLs firmadas (RSA) para servir imágenes de forma privada |
-| **IAM** | Roles con mínimo privilegio por función (Lambda no tiene acceso al bucket input) |
-| **CloudWatch** | Log Groups, métricas y alarma sobre DLQ |
+| Servicio       | Rol                                                                                         |
+| -------------- | ------------------------------------------------------------------------------------------- |
+| **S3**         | Almacenamiento de imágenes input (`image-resize/input/`) y output (`image-resize/resized/`) |
+| **SQS**        | Cola de mensajes con reintentos automáticos y DLQ para mensajes fallidos                    |
+| **Lambda**     | Procesamiento serverless por evento — Python 3.12 + Pillow                                  |
+| **DynamoDB**   | Persistencia de metadata con TTL automático de 90 días                                      |
+| **SNS**        | Notificaciones fanout (email, webhook, otro Lambda)                                         |
+| **CloudFront** | CDN con URLs firmadas (RSA) para servir imágenes de forma privada                           |
+| **IAM**        | Roles con mínimo privilegio por función (Lambda no tiene acceso al bucket input)            |
+| **CloudWatch** | Log Groups, métricas y alarma sobre DLQ                                                     |
 
 ---
 
@@ -180,14 +135,14 @@ aws-event-driven-image-processing-platform/
 
 ## Prerequisitos
 
-| Herramienta | Versión mínima | Uso |
-|-------------|---------------|-----|
-| Node.js | 20 LTS | Backend |
-| Node.js | 22 LTS | Frontend |
-| pnpm | 11 | Gestor de paquetes |
-| Python | 3.12 | Empaquetado Lambda |
-| Terraform | 1.4 | Infraestructura |
-| AWS CLI | 2.x | Credenciales |
+| Herramienta | Versión mínima | Uso                |
+| ----------- | -------------- | ------------------ |
+| Node.js     | 20 LTS         | Backend            |
+| Node.js     | 22 LTS         | Frontend           |
+| pnpm        | 11             | Gestor de paquetes |
+| Python      | 3.12           | Empaquetado Lambda |
+| Terraform   | 1.4            | Infraestructura    |
+| AWS CLI     | 2.x            | Credenciales       |
 
 Credenciales AWS configuradas con permisos sobre: S3, SQS, Lambda, DynamoDB, SNS, IAM, CloudWatch, CloudFront.
 
@@ -257,31 +212,31 @@ terraform destroy -var="env=dev"
 
 ## Variables de Terraform
 
-| Variable | Tipo | Default | Descripción |
-|----------|------|---------|-------------|
-| `env` | string | — | Entorno: `dev`, `staging` o `prod` |
-| `aws_region` | string | `us-east-1` | Región de despliegue |
-| `aws_profile` | string | `leader-developer-personal` | Perfil de AWS CLI |
-| `notification_email` | string | `""` | Email para suscripción SNS (vacío = sin suscripción) |
-| `lambda_timeout` | number | `60` | Timeout de Lambda en segundos |
-| `lambda_memory_mb` | number | `512` | Memoria de Lambda en MB |
-| `lambda_reserved_concurrency` | number | `-1` | Concurrencia reservada (`-1` = pool general) |
-| `sqs_batch_size` | number | `10` | Mensajes por invocación de Lambda |
-| `log_retention_days` | number | `30` | Retención de logs en CloudWatch |
+| Variable                      | Tipo   | Default                     | Descripción                                          |
+| ----------------------------- | ------ | --------------------------- | ---------------------------------------------------- |
+| `env`                         | string | —                           | Entorno: `dev`, `staging` o `prod`                   |
+| `aws_region`                  | string | `us-east-1`                 | Región de despliegue                                 |
+| `aws_profile`                 | string | `leader-developer-personal` | Perfil de AWS CLI                                    |
+| `notification_email`          | string | `""`                        | Email para suscripción SNS (vacío = sin suscripción) |
+| `lambda_timeout`              | number | `60`                        | Timeout de Lambda en segundos                        |
+| `lambda_memory_mb`            | number | `512`                       | Memoria de Lambda en MB                              |
+| `lambda_reserved_concurrency` | number | `-1`                        | Concurrencia reservada (`-1` = pool general)         |
+| `sqs_batch_size`              | number | `10`                        | Mensajes por invocación de Lambda                    |
+| `log_retention_days`          | number | `30`                        | Retención de logs en CloudWatch                      |
 
 ---
 
 ## Outputs de Terraform
 
-| Output | Descripción |
-|--------|-------------|
-| `bucket_name` | Nombre del bucket S3 |
-| `sqs_queue_url` | URL de la cola SQS principal |
-| `sqs_dlq_url` | URL de la Dead-Letter Queue |
-| `dynamodb_table_name` | Nombre de la tabla DynamoDB |
-| `sns_topic_arn` | ARN del topic SNS |
-| `lambda_function_name` | Nombre de la función Lambda |
-| `cloudwatch_log_group` | Nombre del Log Group |
+| Output                 | Descripción                                                   |
+| ---------------------- | ------------------------------------------------------------- |
+| `bucket_name`          | Nombre del bucket S3                                          |
+| `sqs_queue_url`        | URL de la cola SQS principal                                  |
+| `sqs_dlq_url`          | URL de la Dead-Letter Queue                                   |
+| `dynamodb_table_name`  | Nombre de la tabla DynamoDB                                   |
+| `sns_topic_arn`        | ARN del topic SNS                                             |
+| `lambda_function_name` | Nombre de la función Lambda                                   |
+| `cloudwatch_log_group` | Nombre del Log Group                                          |
 | `env_vars_for_backend` | Variables de entorno listas para copiar al `.env` del backend |
 
 ---
@@ -290,7 +245,7 @@ terraform destroy -var="env=dev"
 
 ### SQS como buffer entre S3 y Lambda
 
-S3 Event Notifications tienen entrega *at-least-once*: el mismo evento puede llegar dos veces en condiciones de red inusuales. Interponer SQS permite:
+S3 Event Notifications tienen entrega _at-least-once_: el mismo evento puede llegar dos veces en condiciones de red inusuales. Interponer SQS permite:
 
 1. **Reintentos controlados** con `MaxReceiveCount=3` antes de derivar a la DLQ.
 2. **`VisibilityTimeout = 6 × Lambda timeout`** — mientras Lambda procesa, SQS oculta el mensaje. Si Lambda falla o supera el timeout, el mensaje vuelve a la cola automáticamente.
@@ -298,7 +253,7 @@ S3 Event Notifications tienen entrega *at-least-once*: el mismo evento puede lle
 
 ### Idempotencia en DynamoDB
 
-Antes de procesar, Lambda consulta DynamoDB con el `imageId` (S3 key). Si ya existe, descarta el mensaje. Esto protege contra el doble procesamiento derivado de la semántica *at-least-once* de S3+SQS.
+Antes de procesar, Lambda consulta DynamoDB con el `imageId` (S3 key). Si ya existe, descarta el mensaje. Esto protege contra el doble procesamiento derivado de la semántica _at-least-once_ de S3+SQS.
 
 ### CloudFront con URLs Firmadas RSA
 
@@ -323,13 +278,13 @@ La función Lambda corre en Linux (`x86_64`). Pillow requiere binarios nativos d
 
 ## Costos Estimados
 
-| Servicio | Capa gratuita | Costo posterior |
-|----------|---------------|-----------------|
-| Lambda | 1 M requests/mes + 400K GB-s | $0.20/M requests + $0.0000166667/GB-s |
-| SQS | 1 M requests/mes | $0.40/M requests |
-| S3 | 5 GB + 20K GET + 2K PUT | $0.023/GB + $0.0004/1K PUT |
-| DynamoDB | 25 GB + 25 WCU + 25 RCU | $0.25/GB + $1.25/M writes |
-| CloudFront | 1 TB tráfico + 10M requests | $0.0085/GB + $0.0075/10K requests |
+| Servicio   | Capa gratuita                | Costo posterior                       |
+| ---------- | ---------------------------- | ------------------------------------- |
+| Lambda     | 1 M requests/mes + 400K GB-s | $0.20/M requests + $0.0000166667/GB-s |
+| SQS        | 1 M requests/mes             | $0.40/M requests                      |
+| S3         | 5 GB + 20K GET + 2K PUT      | $0.023/GB + $0.0004/1K PUT            |
+| DynamoDB   | 25 GB + 25 WCU + 25 RCU      | $0.25/GB + $1.25/M writes             |
+| CloudFront | 1 TB tráfico + 10M requests  | $0.0085/GB + $0.0075/10K requests     |
 
 > Estimación de uso moderado (~10K imágenes/mes): **< $5 USD/mes**.
 
