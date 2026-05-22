@@ -1,0 +1,13 @@
+# Copia este archivo como terraform.tfvars y completa los valores reales.
+# No subas terraform.tfvars al repositorio (está en .gitignore).
+
+env    = "dev"
+domain = "content-distribution.alfredo-dominguez.dev"
+
+# Restringe el acceso SSH a tu IP pública para mayor seguridad:
+#   curl ifconfig.me   → obtienes tu IP actual
+# ssh_allowed_cidr = "203.0.113.10/32"
+ssh_allowed_cidr = "0.0.0.0/0"
+
+# Puerto en el que escucha la API Node.js dentro del contenedor
+app_port = 3000
